@@ -11,3 +11,5 @@ Flask-JWT-Extended
 flask-smorest
 pytest
 pytest-flask
+httpx>=0.23.0,<0.28.0
+anyio[trio]
