@@ -1,3 +1,42 @@
+1. Configuracion de Base de Datos
+Creacion de una base de datos MySQL en Railway.
+
+Obtencion de la variable de entorno DATABASE_URL para la conexion.
+
+2. Desarrollo del Backend (FastAPI)
+Implementacion de la API con FastAPI y SQLAlchemy para la gestion de tareas.
+
+Integracion de Autenticacion mediante JWT (JSON Web Tokens) con el endpoint /token.
+
+Configuracion de Logging para el monitoreo de eventos y errores.
+
+Documentacion automatica con OpenAPI/Swagger disponible en la ruta /docs.
+
+3. Desarrollo del Frontend (Vue 3)
+Creacion de la interfaz de usuario para consumir los endpoints de la API.
+
+Configuracion de variables de entorno para conectar con la URL de Render.
+
+4. Contenedorizacion
+Creacion de un Dockerfile multi-stage para optimizar el tamaño de la imagen del backend.
+
+Configuracion de la ejecucion de Uvicorn en el contenedor.
+
+5. Automatizacion con GitHub Actions
+Configuracion de un pipeline de CI (Integracion Continua) que ejecuta tests unitarios con Pytest.
+
+Automatizacion del Build y Push de la imagen Docker hacia Docker Hub tras pasar los tests.
+
+Notificacion automatica a Render mediante un Deploy Hook para actualizar el servicio.
+
+Despliegue automatico del frontend en Vercel tras validar el codigo.
+
+6. Gestion de Secretos y Seguridad
+Configuracion de Secrets en GitHub (DOCKERHUB_TOKEN, RENDER_DEPLOY_HOOK, VERCEL_TOKEN) para proteger credenciales.
+
+Uso de variables de entorno para la clave secreta del JWT y credenciales de base de datos.
+
+Capturas
 ![alt text](image.png)
 ![alt text](image-2.png)
 ![alt text](image-3.png)
