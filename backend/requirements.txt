@@ -6,3 +6,8 @@ uvicorn[standard]
 SQLAlchemy==2.0.27
 PyMySQL==1.1.0
 cryptography==42.0.5
+Flask
+Flask-JWT-Extended
+flask-smorest
+pytest
+pytest-flask

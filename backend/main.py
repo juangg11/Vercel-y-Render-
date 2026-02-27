@@ -1,4 +1,5 @@
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, HTTPException, Depends, status
+from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import create_engine, Integer, String, select
@@ -7,180 +8,95 @@ from typing import Generator, Literal
 import os
 import time
 import logging
+from jose import JWTError, jwt
+from datetime import datetime, timedelta
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-app = FastAPI(
-    title="API de Demostración Didáctica",
-    description="Backend con FastAPI para la práctica de CI/CD",
-    version="1.0.0"
-)
+SECRET_KEY = os.getenv("JWT_SECRET", "ci_cd_secret_key_999")
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 30
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+
+app = FastAPI(title="API CI/CD", version="2.0.0")
 
 Base = declarative_base()
 
-
 class Item(Base):
     __tablename__ = "items"
-
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     status: Mapped[str] = mapped_column(String(50), nullable=False)
-
 
 class ItemCreate(BaseModel):
     name: str
     status: Literal["Pendiente", "En progreso", "Completado"]
 
-
-class ItemUpdate(BaseModel):
-    name: str | None = None
-    status: Literal["Pendiente", "En progreso", "Completado"] | None = None
-
-
 class ItemOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
-
     id: int
     name: str
     status: str
 
-
 def build_database_url() -> str:
-    database_url = os.getenv("DATABASE_URL")
-    if database_url:
-        if database_url.startswith("mysql://"):
-            return database_url.replace("mysql://", "mysql+pymysql://", 1)
-        return database_url
+    db_url = os.getenv("DATABASE_URL")
+    if db_url and db_url.startswith("mysql://"):
+        return db_url.replace("mysql://", "mysql+pymysql://", 1)
+    return db_url if db_url else "mysql+pymysql://root:pass@localhost/db"
 
-    def require_env(name: str) -> str:
-        value = os.getenv(name)
-        if not value:
-            raise RuntimeError(f"Missing required environment variable: {name}")
-        return value
-
-    db_user = require_env("DB_USER")
-    db_password = require_env("DB_PASSWORD")
-    db_host = require_env("DB_HOST")
-    db_port = require_env("DB_PORT")
-    db_name = require_env("DB_NAME")
-    return f"mysql+pymysql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
-
-
-engine = create_engine(build_database_url(), pool_pre_ping=True, pool_recycle=3600)
+engine = create_engine(build_database_url(), pool_pre_ping=True)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
-
-def get_db() -> Generator[Session, None, None]:
+def get_db():
     db = SessionLocal()
+    try: yield db
+    finally: db.close()
+
+def create_access_token(data: dict):
+    to_encode = data.copy()
+    expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    to_encode.update({"exp": expire})
+    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+
+async def get_current_user(token: str = Depends(oauth2_scheme)):
+    exc = HTTPException(status_code=401, detail="Invalid token", headers={"WWW-Authenticate": "Bearer"})
     try:
-        yield db
-    finally:
-        db.close()
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        user = payload.get("sub")
+        if user is None: raise exc
+        return user
+    except JWTError: raise exc
 
-
-def seed_data(db: Session) -> None:
-    existing = db.execute(select(Item)).scalars().first()
-    if existing:
-        return
-    db.add_all(
-        [
-            Item(name="Módulo CI/CD", status="Completado"),
-            Item(name="Módulo Docker", status="En progreso"),
-            Item(name="Módulo Despliegue", status="Pendiente"),
-        ]
-    )
-    db.commit()
-
-# Configuración de CORS para permitir peticiones desde el Frontend (Vercel o local)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # En producción, restringir a dominios específicos
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-
-@app.on_event("startup")
-def on_startup() -> None:
-    max_retries = 10
-    retry_interval = 5  # segundos
-    
-    for attempt in range(1, max_retries + 1):
-        try:
-            logger.info(f"Intento {attempt}/{max_retries}: Conectando a la base de datos...")
-            Base.metadata.create_all(bind=engine)
-            with SessionLocal() as session:
-                # Verificar conexión
-                session.execute(select(1))
-                seed_data(session)
-            logger.info("✓ Conexión a la base de datos exitosa")
-            break
-        except Exception as e:
-            logger.warning(f"✗ Error al conectar (intento {attempt}/{max_retries}): {e}")
-            if attempt == max_retries:
-                logger.error("No se pudo conectar a la base de datos después de múltiples intentos")
-                raise
-            logger.info(f"Reintentando en {retry_interval} segundos...")
-            time.sleep(retry_interval)
+@app.post("/token")
+async def login(form_data: OAuth2PasswordRequestForm = Depends()):
+    if form_data.username == "admin" and form_data.password == "12345":
+        return {"access_token": create_access_token({"sub": form_data.username}), "token_type": "bearer"}
+    raise HTTPException(status_code=401, detail="Incorrect credentials")
 
 @app.get("/")
 async def root():
-    return {
-        "status": "online",
-        "message": "El Backend está funcionando correctamente.",
-        "docs": "/docs"
-    }
-
-@app.get("/api/data")
-async def get_data(db: Session = Depends(get_db)):
-    items = db.execute(select(Item)).scalars().all()
-    return {
-        "items": [ItemOut.model_validate(item).model_dump() for item in items],
-        "backend_engine": "FastAPI + MySQL"
-    }
-
+    return {"status": "online", "docs": "/docs"}
 
 @app.get("/api/items", response_model=list[ItemOut])
-async def list_items(db: Session = Depends(get_db)):
-    items = db.execute(select(Item)).scalars().all()
-    return [ItemOut.model_validate(item) for item in items]
+async def list_items(db: Session = Depends(get_db), user: str = Depends(get_current_user)):
+    return db.execute(select(Item)).scalars().all()
 
-
-@app.post("/api/items", response_model=ItemOut, status_code=201)
-async def create_item(payload: ItemCreate, db: Session = Depends(get_db)):
+@app.post("/api/items", response_model=ItemOut)
+async def create_item(payload: ItemCreate, db: Session = Depends(get_db), user: str = Depends(get_current_user)):
     item = Item(name=payload.name, status=payload.status)
     db.add(item)
     db.commit()
     db.refresh(item)
-    return ItemOut.model_validate(item)
+    logger.info(f"Item created by {user}")
+    return item
 
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
-@app.put("/api/items/{item_id}", response_model=ItemOut)
-async def update_item(item_id: int, payload: ItemUpdate, db: Session = Depends(get_db)):
-    item = db.get(Item, item_id)
-    if not item:
-        raise HTTPException(status_code=404, detail="Item not found")
-    if payload.name is not None:
-        item.name = payload.name
-    if payload.status is not None:
-        item.status = payload.status
-    db.commit()
-    db.refresh(item)
-    return ItemOut.model_validate(item)
-
-
-@app.delete("/api/items/{item_id}", status_code=204)
-async def delete_item(item_id: int, db: Session = Depends(get_db)):
-    item = db.get(Item, item_id)
-    if not item:
-        raise HTTPException(status_code=404, detail="Item not found")
-    db.delete(item)
-    db.commit()
-    return None
-
-if __name__ == "__main__":
-    import uvicorn
-    port = int(os.getenv("PORT", 8000))
-    uvicorn.run(app, host="0.0.0.0", port=port)
+@app.on_event("startup")
+def on_startup():
+    for _ in range(5):
+        try:
+            Base.metadata.create_all(bind=engine)
+            break
+        except: time.sleep(5)
