@@ -3,8 +3,6 @@ name: CI/CD Pipeline FastAPI
 on:
   push:
     branches: [ main ]
-    paths:
-      - 'backend/**'
 
 jobs:
   test:
